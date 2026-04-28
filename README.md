@@ -1,4 +1,4 @@
-# Project-UAS-pemrograman-Mobile-Semester-3
+# Project-UAS-pemrograman-Mobile-
 pembuatan aplikasi ToDoList
 Nama : Aldi Nizar Saputro
 NIM  :312410293
