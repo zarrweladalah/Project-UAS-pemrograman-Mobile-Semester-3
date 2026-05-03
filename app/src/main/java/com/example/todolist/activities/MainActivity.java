@@ -1,7 +1,6 @@
 package com.example.todolist.activities;
 
 import android.content.Intent;
-import android.graphics.Color;
 import android.os.Bundle;
 import android.text.TextUtils;
 import android.view.LayoutInflater;
@@ -27,6 +26,7 @@ import com.example.todolist.database.TaskDao;
 import com.example.todolist.models.Folder;
 import com.example.todolist.models.Task;
 import com.example.todolist.utils.SessionManager;
+import com.example.todolist.utils.AiHelper; // Import AI Helper
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 
 import java.util.ArrayList;
@@ -41,13 +41,13 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
     private TextView welcomeText;
     private TextView taskCountText;
     private LinearLayout emptyStateLayout;
-    
+
     private TaskAdapter taskAdapter;
     private FolderAdapter folderAdapter;
     private TaskDao taskDao;
     private FolderDao folderDao;
     private SessionManager sessionManager;
-    
+
     private List<Task> taskList = new ArrayList<>();
     private List<Folder> folderList = new ArrayList<>();
 
@@ -57,7 +57,7 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
         setContentView(R.layout.activity_main);
 
         initViews();
-        
+
         AppDatabase database = AppDatabase.getInstance(this);
         taskDao = database.taskDao();
         folderDao = database.folderDao();
@@ -87,12 +87,10 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
     }
 
     private void setupRecyclerViews() {
-        // Tasks RecyclerView
         taskAdapter = new TaskAdapter(taskList, this);
         tasksRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         tasksRecyclerView.setAdapter(taskAdapter);
 
-        // Folders RecyclerView
         folderAdapter = new FolderAdapter(folderList, this, taskDao);
         foldersRecyclerView.setLayoutManager(new LinearLayoutManager(this));
         foldersRecyclerView.setAdapter(folderAdapter);
@@ -100,9 +98,7 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
 
     private void setupClickListeners() {
         fabAddTask.setOnClickListener(v -> showAddTaskDialog(null));
-        
         fabAddFolder.setOnClickListener(v -> showAddFolderDialog());
-
         settingsButton.setOnClickListener(v -> {
             Intent intent = new Intent(MainActivity.this, SettingsActivity.class);
             startActivity(intent);
@@ -120,23 +116,18 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
 
     private void loadData() {
         int userId = sessionManager.getUserId();
-        
-        // Load folders
         folderList.clear();
         folderList.addAll(folderDao.getFoldersByUserId(userId));
         folderAdapter.updateFolders(folderList);
 
-        // Load tasks without folder
         taskList.clear();
         taskList.addAll(taskDao.getTasksWithoutFolder(userId));
         taskAdapter.updateTasks(taskList);
 
-        // Update task count
         int totalTasks = taskDao.getTaskCount(userId);
         int completedTasks = taskDao.getCompletedTaskCount(userId);
         taskCountText.setText(completedTasks + "/" + totalTasks + " tasks completed");
 
-        // Show/hide empty state
         if (taskList.isEmpty() && folderList.isEmpty()) {
             emptyStateLayout.setVisibility(View.VISIBLE);
         } else {
@@ -144,13 +135,14 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
         }
     }
 
+    // --- BAGIAN YANG DIEDIT UNTUK AI ---
     private void showAddTaskDialog(Integer folderId) {
         View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_add_task, null);
         EditText titleInput = dialogView.findViewById(R.id.task_title_input);
         EditText descriptionInput = dialogView.findViewById(R.id.task_description_input);
 
         AlertDialog dialog = new AlertDialog.Builder(this)
-                .setTitle("Add New Task")
+                .setTitle("Add New Task (AI Enhanced)")
                 .setView(dialogView)
                 .setPositiveButton("Add", null)
                 .setNegativeButton("Cancel", null)
@@ -167,14 +159,42 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
                     return;
                 }
 
-                Task newTask = new Task(title, sessionManager.getUserId());
-                newTask.setDescription(description);
-                newTask.setFolderId(folderId);
-                
-                taskDao.insert(newTask);
-                Toast.makeText(MainActivity.this, "Task added!", Toast.LENGTH_SHORT).show();
-                loadData();
-                dialog.dismiss();
+                // Efek loading biar kelihatan AI-nya kerja
+                positiveButton.setEnabled(false);
+                positiveButton.setText("AI Thinking...");
+
+                // Panggil AI untuk tentuin prioritas
+                AiHelper.detectPriority(title, new AiHelper.AiPriorityCallback() {
+                    @Override
+                    public void onResult(int aiPriority) {
+                        runOnUiThread(() -> {
+                            Task newTask = new Task(title, sessionManager.getUserId());
+                            newTask.setDescription(description);
+                            newTask.setFolderId(folderId);
+                            newTask.setPriority(aiPriority); // Set hasil AI
+
+                            taskDao.insert(newTask);
+                            Toast.makeText(MainActivity.this, "AI set priority to: " + aiPriority, Toast.LENGTH_SHORT).show();
+                            loadData();
+                            dialog.dismiss();
+                        });
+                    }
+
+                    @Override
+                    public void onError(String error) {
+                        runOnUiThread(() -> {
+                            // Kalau error, simpan dengan prioritas default (2)
+                            Task newTask = new Task(title, sessionManager.getUserId());
+                            newTask.setDescription(description);
+                            newTask.setFolderId(folderId);
+                            newTask.setPriority(2);
+
+                            taskDao.insert(newTask);
+                            loadData();
+                            dialog.dismiss();
+                        });
+                    }
+                });
             });
         });
 
@@ -196,20 +216,16 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
             Button positiveButton = dialog.getButton(AlertDialog.BUTTON_POSITIVE);
             positiveButton.setOnClickListener(v -> {
                 String name = nameInput.getText().toString().trim();
-
                 if (TextUtils.isEmpty(name)) {
                     nameInput.setError("Folder name is required");
                     return;
                 }
-
                 Folder newFolder = new Folder(name, sessionManager.getUserId());
                 folderDao.insert(newFolder);
-                Toast.makeText(MainActivity.this, "Folder created!", Toast.LENGTH_SHORT).show();
                 loadData();
                 dialog.dismiss();
             });
         });
-
         dialog.show();
     }
 
@@ -236,7 +252,6 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
                 .setMessage("Are you sure you want to delete this task?")
                 .setPositiveButton("Delete", (dialog, which) -> {
                     taskDao.delete(task);
-                    Toast.makeText(this, "Task deleted!", Toast.LENGTH_SHORT).show();
                     loadData();
                 })
                 .setNegativeButton("Cancel", null)
@@ -262,7 +277,6 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
                 .setMessage("Are you sure you want to delete this folder and all its tasks?")
                 .setPositiveButton("Delete", (dialog, which) -> {
                     folderDao.delete(folder);
-                    Toast.makeText(this, "Folder deleted!", Toast.LENGTH_SHORT).show();
                     loadData();
                 })
                 .setNegativeButton("Cancel", null)
@@ -270,18 +284,11 @@ public class MainActivity extends AppCompatActivity implements TaskAdapter.OnTas
     }
 
     @Override
-    public void onFolderTaskClick(Task task) {
-        onTaskClick(task);
-    }
+    public void onFolderTaskClick(Task task) { onTaskClick(task); }
 
     @Override
-    public void onFolderTaskCheckChanged(Task task, boolean isCompleted) {
-        onTaskCheckChanged(task, isCompleted);
-    }
+    public void onFolderTaskCheckChanged(Task task, boolean isCompleted) { onTaskCheckChanged(task, isCompleted); }
 
     @Override
-    public void onFolderTaskDelete(Task task) {
-        onTaskDelete(task);
-    }
+    public void onFolderTaskDelete(Task task) { onTaskDelete(task); }
 }
-

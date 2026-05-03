@@ -22,6 +22,7 @@ import com.example.todolist.database.TaskDao;
 import com.example.todolist.models.Folder;
 import com.example.todolist.models.Task;
 import com.example.todolist.utils.SessionManager;
+import com.example.todolist.utils.AiHelper; // Import helper AI
 import com.google.android.material.textfield.TextInputLayout;
 
 import java.text.SimpleDateFormat;
@@ -44,11 +45,11 @@ public class TaskActivity extends AppCompatActivity {
     private Button folderButton;
     private Button saveButton;
     private TextView createdDateText;
-    
+
     private TaskDao taskDao;
     private FolderDao folderDao;
     private SessionManager sessionManager;
-    
+
     private Task currentTask;
     private int taskId = -1;
     private Integer selectedFolderId = null;
@@ -59,7 +60,7 @@ public class TaskActivity extends AppCompatActivity {
         setContentView(R.layout.activity_task);
 
         initViews();
-        
+
         AppDatabase database = AppDatabase.getInstance(this);
         taskDao = database.taskDao();
         folderDao = database.folderDao();
@@ -95,27 +96,19 @@ public class TaskActivity extends AppCompatActivity {
 
     private void loadTask() {
         currentTask = taskDao.getTaskById(taskId);
-        
+
         if (currentTask != null) {
             titleInput.setText(currentTask.getTitle());
             descriptionInput.setText(currentTask.getDescription());
             completedCheckbox.setChecked(currentTask.isCompleted());
             selectedFolderId = currentTask.getFolderId();
 
-            // Set priority
             switch (currentTask.getPriority()) {
-                case 1:
-                    priorityLow.setChecked(true);
-                    break;
-                case 2:
-                    priorityMedium.setChecked(true);
-                    break;
-                case 3:
-                    priorityHigh.setChecked(true);
-                    break;
+                case 1: priorityLow.setChecked(true); break;
+                case 2: priorityMedium.setChecked(true); break;
+                case 3: priorityHigh.setChecked(true); break;
             }
 
-            // Set folder button text
             if (selectedFolderId != null) {
                 Folder folder = folderDao.getFolderById(selectedFolderId);
                 if (folder != null) {
@@ -123,10 +116,8 @@ public class TaskActivity extends AppCompatActivity {
                 }
             }
 
-            // Set created date
             SimpleDateFormat sdf = new SimpleDateFormat("Created: MMM dd, yyyy HH:mm", Locale.getDefault());
             createdDateText.setText(sdf.format(new Date(currentTask.getCreatedAt())));
-
             deleteButton.setVisibility(View.VISIBLE);
         }
     }
@@ -154,13 +145,11 @@ public class TaskActivity extends AppCompatActivity {
         });
 
         folderButton.setOnClickListener(v -> showFolderPicker());
-
         saveButton.setOnClickListener(v -> saveTask());
     }
 
     private void showFolderPicker() {
         List<Folder> folders = folderDao.getFoldersByUserId(sessionManager.getUserId());
-        
         String[] folderNames = new String[folders.size() + 1];
         folderNames[0] = "No Folder";
         for (int i = 0; i < folders.size(); i++) {
@@ -193,6 +182,7 @@ public class TaskActivity extends AppCompatActivity {
                 .show();
     }
 
+    // --- BAGIAN YANG DIEDIT UNTUK AI ---
     private void saveTask() {
         titleInputLayout.setError(null);
 
@@ -205,35 +195,54 @@ public class TaskActivity extends AppCompatActivity {
             return;
         }
 
-        // Get priority
-        int priority = 2; // Default medium
-        if (priorityLow.isChecked()) {
-            priority = 1;
-        } else if (priorityHigh.isChecked()) {
-            priority = 3;
-        }
+        // Tampilkan indikator loading pada tombol
+        saveButton.setEnabled(false);
+        saveButton.setText("AI is analyzing...");
 
+        // Panggil AI Helper untuk menentukan prioritas otomatis
+        AiHelper.detectPriority(title, new AiHelper.AiPriorityCallback() {
+            @Override
+            public void onResult(int aiPriority) {
+                // Jalankan di UI Thread agar bisa update database & navigasi
+                runOnUiThread(() -> finalizeSave(title, description, isCompleted, aiPriority));
+            }
+
+            @Override
+            public void onError(String error) {
+                runOnUiThread(() -> {
+                    // Jika AI gagal, gunakan prioritas dari RadioButton manual sebagai cadangan
+                    int fallbackPriority = 2;
+                    if (priorityLow.isChecked()) fallbackPriority = 1;
+                    else if (priorityHigh.isChecked()) fallbackPriority = 3;
+
+                    finalizeSave(title, description, isCompleted, fallbackPriority);
+                });
+            }
+        });
+    }
+
+    private void finalizeSave(String title, String description, boolean isCompleted, int finalPriority) {
         if (currentTask != null) {
-            // Update existing task
+            // Update tugas lama
             currentTask.setTitle(title);
             currentTask.setDescription(description);
             currentTask.setCompleted(isCompleted);
-            currentTask.setPriority(priority);
+            currentTask.setPriority(finalPriority);
             currentTask.setFolderId(selectedFolderId);
             currentTask.setUpdatedAt(System.currentTimeMillis());
-            
+
             taskDao.update(currentTask);
-            Toast.makeText(this, "Task updated!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "Task updated (Priority: " + finalPriority + ")", Toast.LENGTH_SHORT).show();
         } else {
-            // Create new task
+            // Buat tugas baru
             Task newTask = new Task(title, sessionManager.getUserId());
             newTask.setDescription(description);
             newTask.setCompleted(isCompleted);
-            newTask.setPriority(priority);
+            newTask.setPriority(finalPriority);
             newTask.setFolderId(selectedFolderId);
-            
+
             taskDao.insert(newTask);
-            Toast.makeText(this, "Task created!", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "AI set priority to: " + finalPriority, Toast.LENGTH_SHORT).show();
         }
 
         finish();
@@ -246,4 +255,3 @@ public class TaskActivity extends AppCompatActivity {
         overridePendingTransition(R.anim.slide_in_left, R.anim.slide_out_right);
     }
 }
-
